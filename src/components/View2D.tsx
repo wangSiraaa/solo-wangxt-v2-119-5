@@ -154,7 +154,12 @@ export function View2D() {
     };
   }, []);
 
-  const { mesh: meshData, stats } = state;
+  // 预览待确认时，2D 视图临时展示【候选】UV；3D 视图与正式数据不动。
+  const preview = state.preview;
+  const meshData = preview ? preview.candidate : state.mesh;
+  const stats = preview ? preview.candidateStats : state.stats;
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
 
   // 重建填充与分类边
   useEffect(() => {
@@ -201,13 +206,15 @@ export function View2D() {
     }
   }, [meshData, stats, state.showFlipped, state.showOverlap]);
 
-  // 选择高亮
+  // 选择高亮（预览态隐藏：选择集属于当前模型，叠到候选 UV 上会错位）
   useEffect(() => {
     const world = worldRef.current;
     if (!world || !meshData) return;
     world.selection.geometry.dispose();
-    world.selection.geometry = buildUvSelection(meshData, state.selectedFaceIds);
-  }, [state.selectedFaceIds, meshData]);
+    world.selection.geometry = preview
+      ? new THREE.BufferGeometry()
+      : buildUvSelection(meshData, state.selectedFaceIds);
+  }, [state.selectedFaceIds, meshData, preview]);
 
   // 拾取（平移与点选区分）
   useEffect(() => {
@@ -228,6 +235,8 @@ export function View2D() {
       if (Math.hypot(e.clientX - world.downX, e.clientY - world.downY) > 4) return;
       const data = world.meshData;
       if (!data) return;
+      // 预览候选未采用前，2D 点选不改当前模型的选择集
+      if (previewRef.current) return;
       setPointer(e);
       world.raycaster.setFromCamera(world.pointer, world.camera);
       const hits = world.raycaster.intersectObject(world.fills, false);
@@ -252,7 +261,9 @@ export function View2D() {
   return (
     <div className="view view2d" ref={mountRef}>
       <div className="view-label">
-        2D UV — V 向上（OBJ 原生方向）· 双击自适应 · 拖动平移/滚轮缩放
+        {preview
+          ? '2D UV — 预览候选展开（未采用）· 双击自适应 · 确认前不可点选'
+          : '2D UV — V 向上（OBJ 原生方向）· 双击自适应 · 拖动平移/滚轮缩放'}
       </div>
     </div>
   );

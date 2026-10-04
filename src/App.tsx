@@ -4,6 +4,7 @@ import { Toolbar } from './components/Toolbar';
 import { View3D } from './components/View3D';
 import { View2D } from './components/View2D';
 import { StatsPanel } from './components/StatsPanel';
+import { PreviewBar } from './components/PreviewBar';
 import { SAMPLES } from './core/samples';
 
 function Notice() {
@@ -49,7 +50,8 @@ function EmptyState() {
         ))}
       </div>
       <p className="hint">
-        xatlas WASM 自动展开为可选项，失败时原模型与原 UV 原样保留；
+        xatlas WASM 自动展开为可选项：先生成候选并在 2D 视图预览、对比展开前后
+        指标，采用后才替换（可撤销）；放弃或失败时当前模型与撤销历史原样保留。
         工程存于浏览器 IndexedDB，无后端。导出的 OBJ 可在 Blender/Maya 等
         标准工具中重新载入验证。
       </p>
@@ -64,7 +66,10 @@ function Workspace() {
     <div className="workspace">
       <div className="views">
         <View3D />
-        <View2D />
+        <div className="view2d-wrap">
+          <View2D />
+          {state.preview && <PreviewBar />}
+        </div>
         <Legend />
       </div>
       <StatsPanel />

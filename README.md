@@ -12,13 +12,16 @@ npm run build      # 类型检查 + 生产构建（dist/）
 npm run preview    # 预览构建产物
 ```
 
-Node 侧核心测试与无头浏览器端到端测试：
+Node 侧核心测试、预览流程测试与无头浏览器端到端测试：
 
 ```bash
 npx esbuild scripts/test-core.ts --bundle --format=esm --platform=node \
   --outfile=/tmp/t.mjs && node /tmp/t.mjs
 npx esbuild scripts/test-unwrap-fail.ts --bundle --format=esm --platform=node \
   --outfile=/tmp/u.mjs && node /tmp/u.mjs
+npx esbuild scripts/test-preview.ts --bundle --format=esm --platform=node \
+  --outfile=/tmp/p.mjs && node /tmp/p.mjs
+node --import tsx scripts/test-preview-ui.tsx
 
 npm run build && npx vite preview --port 5199
 # 另一个终端：
@@ -39,7 +42,9 @@ node --import tsx scripts/e2e.ts
 | 面积畸变 / 角度畸变分别显示 | `src/core/metrics.ts`，面板分区显示 |
 | 退化面不参与普通比率计算 | 薄片（sliver）判据，比率与角度为 `null` |
 | 镜像岛、共享边接缝、非流形边样例 | 「样例」菜单四个内置模型 |
-| 自动展开失败保留原模型 | `runUnwrap` 只在成功返回时 `replace-mesh`；入参不被修改 |
+| 自动展开失败保留原模型 | `runUnwrap` 只在成功时生成候选；入参不被修改，失败不进预览 |
+| 展开先预览、采用后才替换 | WASM 候选先在 2D 视图展示 + 前后指标对比（`PreviewBar`），「采用」才一次替换并入撤销栈，「放弃」候选直接丢弃 |
+| 预览期间网格/历史不动 | `state.preview` 与 `state.mesh/history` 分离；预览中禁用导出/存工程/撤销，放弃后导出 OBJ 与预览前逐字节一致 |
 | 导出 UV 可被标准工具重载验证 | 非索引 `v/vt` OBJ；e2e 已做导出→重载往返断言 |
 
 ## 身份模型（关键设计）
@@ -81,7 +86,25 @@ UV 岛的连通要求**同时**满足 3D 共享边且该边两端 UV 一致—�
 `角点 → 焊接点`。xatlas 输出三角形顺序与输入一致，输出顶点带 `xref`
 指回焊接点；再按输出三角形角点把新 UV **分发回每一个稳定角点**，
 接缝两侧自然得到不同 UV。像素 UV 按 atlas 宽高归一化。任何异常都
-抛出，UI 捕获后原模型原封不动，可「撤销」回到展开前。
+抛出，UI 捕获后不进入预览，原模型原封不动。
+
+## 预览确认流程（采用/放弃）
+
+自动展开不再直接替换当前 UV：
+
+1. WASM 返回后，`buildUnwrapCandidate` 在**不触碰当前 mesh** 的前提下
+   构造候选网格（每角点一个独立 vt 槽），NaN / 数量不符一律抛错；
+2. 对候选网格跑同一份 `analyzeMesh`，与展开前的摘要并排显示
+   （岛数、翻转/镜像岛、岛间重叠、退化、面积/角度畸变），候选 UV
+   只临时画在 **2D 视图**里（3D 视图与右侧面板仍是当前网格）；
+3. 候选挂在独立的 `state.preview` 上 —— `mesh / stats / history`
+   全部保持展开前内容，预览期间禁用导出、存工程与撤销；
+4. **放弃**：仅清掉 `state.preview`，当前网格与撤销历史零变化
+   （测试断言导出 OBJ 与预览前逐字节一致）；
+5. **采用**：reducer 里一次性把候选写入 `mesh/stats`，旧 mesh 进入
+   撤销栈（最多 10 步），随后可一键撤销回到展开前；
+6. 存工程/导出只读取已采用的 `state.mesh`，保存重开看到的永远是
+   已采用版本；载入其他模型会丢弃未决预览。不建立任何持久化修订图。
 
 ## 导出验证
 

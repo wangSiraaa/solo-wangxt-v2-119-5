@@ -8,6 +8,7 @@ export function Toolbar() {
     projects, openProject, removeProject, setChecker, toggleFlag, undo,
   } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
+  const previewing = state.preview !== null;
 
   const onFile = async (file: File) => {
     const text = await file.text();
@@ -50,13 +51,19 @@ export function Toolbar() {
 
       <button
         className="primary"
-        disabled={!state.mesh || state.unwrapping}
+        disabled={!state.mesh || state.unwrapping || previewing}
         onClick={() => void runUnwrap()}
-        title="调用 xatlas WASM 重新展开；失败时自动保留原模型"
+        title={previewing
+          ? '已有候选展开待确认，请先采用或放弃'
+          : '调用 xatlas WASM 生成候选展开；先在 2D 视图预览，采用后才替换'}
       >
         {state.unwrapping ? '展开中…' : 'xatlas 自动展开'}
       </button>
-      <button disabled={state.history.length === 0} onClick={undo}>
+      <button
+        disabled={state.history.length === 0 || previewing}
+        onClick={undo}
+        title={previewing ? '请先采用或放弃候选展开' : '撤销上一次已采用的 UV 替换'}
+      >
         撤销 ({state.history.length})
       </button>
 
@@ -99,11 +106,17 @@ export function Toolbar() {
 
       <span className="sep" />
 
-      <button disabled={!state.mesh} onClick={exportCurrent}
-        title="导出非索引 v/vt OBJ，标准工具可重新载入验证">
+      <button disabled={!state.mesh || previewing} onClick={exportCurrent}
+        title={previewing
+          ? '候选未采用：导出的是当前 UV，请先采用或放弃'
+          : '导出非索引 v/vt OBJ，标准工具可重新载入验证'}>
         导出 UV OBJ
       </button>
-      <button disabled={!state.mesh} onClick={() => void saveCurrent()}>
+      <button
+        disabled={!state.mesh || previewing}
+        onClick={() => void saveCurrent()}
+        title={previewing ? '候选未采用：请先采用或放弃再存工程' : undefined}
+      >
         存工程
       </button>
 
