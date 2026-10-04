@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './state/AppContext';
 import { Toolbar } from './components/Toolbar';
 import { View3D } from './components/View3D';
 import { View2D } from './components/View2D';
+import { PreviewBar } from './components/PreviewBar';
 import { StatsPanel } from './components/StatsPanel';
 import { SAMPLES } from './core/samples';
 
@@ -49,7 +50,8 @@ function EmptyState() {
         ))}
       </div>
       <p className="hint">
-        xatlas WASM 自动展开为可选项，失败时原模型与原 UV 原样保留；
+        xatlas WASM 自动展开为可选项：候选 UV 先在 2D 视图预览，确认「采用」
+        后才替换当前 UV，放弃或失败时原模型与原 UV 原样保留；
         工程存于浏览器 IndexedDB，无后端。导出的 OBJ 可在 Blender/Maya 等
         标准工具中重新载入验证。
       </p>
@@ -65,6 +67,7 @@ function Workspace() {
       <div className="views">
         <View3D />
         <View2D />
+        <PreviewBar />
         <Legend />
       </div>
       <StatsPanel />

@@ -19,6 +19,8 @@ npx esbuild scripts/test-core.ts --bundle --format=esm --platform=node \
   --outfile=/tmp/t.mjs && node /tmp/t.mjs
 npx esbuild scripts/test-unwrap-fail.ts --bundle --format=esm --platform=node \
   --outfile=/tmp/u.mjs && node /tmp/u.mjs
+npx esbuild scripts/test-preview.ts --bundle --format=esm --platform=node \
+  --outfile=/tmp/p.mjs && node /tmp/p.mjs
 
 npm run build && npx vite preview --port 5199
 # 另一个终端：
@@ -39,7 +41,8 @@ node --import tsx scripts/e2e.ts
 | 面积畸变 / 角度畸变分别显示 | `src/core/metrics.ts`，面板分区显示 |
 | 退化面不参与普通比率计算 | 薄片（sliver）判据，比率与角度为 `null` |
 | 镜像岛、共享边接缝、非流形边样例 | 「样例」菜单四个内置模型 |
-| 自动展开失败保留原模型 | `runUnwrap` 只在成功返回时 `replace-mesh`；入参不被修改 |
+| 自动展开失败保留原模型 | `runUnwrap` 只在成功时挂预览；入参不被修改 |
+| 自动展开先预览再确认 | 候选 UV 在 2D 视图预览 + 前后指标对比，`PreviewBar` 采用/放弃；采用是唯一替换点（`appState.ts`） |
 | 导出 UV 可被标准工具重载验证 | 非索引 `v/vt` OBJ；e2e 已做导出→重载往返断言 |
 
 ## 身份模型（关键设计）
@@ -81,7 +84,21 @@ UV 岛的连通要求**同时**满足 3D 共享边且该边两端 UV 一致—�
 `角点 → 焊接点`。xatlas 输出三角形顺序与输入一致，输出顶点带 `xref`
 指回焊接点；再按输出三角形角点把新 UV **分发回每一个稳定角点**，
 接缝两侧自然得到不同 UV。像素 UV 按 atlas 宽高归一化。任何异常都
-抛出，UI 捕获后原模型原封不动，可「撤销」回到展开前。
+抛出，UI 捕获后原模型原封不动。
+
+## 预览-确认流程
+
+展开成功后**不直接替换**当前 UV：候选网格与指标挂在内存态
+`state.preview`（`src/state/appState.ts`，无持久化修订图），2D 视图
+切换显示候选 UV，预览条列出展开前后的岛数、翻转/镜像、重叠与畸变
+摘要（`src/core/summary.ts`，与 StatsPanel 同一 `MeshStats` 口径）。
+
+- **放弃**：`preview-clear`，候选丢弃；当前网格、撤销历史、导出、
+  存工程全程未受影响（预览期间导出仍是展开前的 OBJ）。
+- **采用**：`adopt-preview` 是唯一替换点 —— 旧网格此刻才进入撤销
+  历史（一键撤销即回展开前），预览期算好的 `MeshStats` 直接成为正式
+  指标，存工程/导出立即作用于新版本。
+- 预览待确认期间，再次展开与撤销按钮禁用（状态机同样兜底）。
 
 ## 导出验证
 

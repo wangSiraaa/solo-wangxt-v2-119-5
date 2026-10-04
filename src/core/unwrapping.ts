@@ -22,6 +22,22 @@ export interface UnwrapResult {
   utilization: number;
 }
 
+/**
+ * 由展开结果构造候选网格：每角点一个独立 vt 槽（接缝分裂后本来就不同）。
+ * 纯函数，不修改入参 —— 调用方（预览-确认流程）决定何时、是否用返回值
+ * 替换当前网格；在那之前原模型与原 UV 始终原样保留。
+ */
+export function buildUnwrappedMesh(mesh: MeshData, result: UnwrapResult): MeshData {
+  return {
+    ...mesh,
+    uvs: result.uvs,
+    uvCount: result.uvs.length / 2,
+    hasUv: true,
+    uvOrigin: 'obj',
+    corners: mesh.corners.map((c, ci) => ({ ...c, vt: ci })),
+  };
+}
+
 const POS_EPS_SQ = 1e-12;
 
 /**

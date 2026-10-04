@@ -50,13 +50,19 @@ export function Toolbar() {
 
       <button
         className="primary"
-        disabled={!state.mesh || state.unwrapping}
+        disabled={!state.mesh || state.unwrapping || !!state.preview}
         onClick={() => void runUnwrap()}
-        title="调用 xatlas WASM 重新展开；失败时自动保留原模型"
+        title={state.preview
+          ? '预览待确认：请先采用或放弃'
+          : '调用 xatlas WASM 生成候选 UV，预览确认后才替换；失败时自动保留原模型'}
       >
-        {state.unwrapping ? '展开中…' : 'xatlas 自动展开'}
+        {state.unwrapping ? '展开中…' : state.preview ? '预览待确认…' : 'xatlas 自动展开'}
       </button>
-      <button disabled={state.history.length === 0} onClick={undo}>
+      <button
+        disabled={state.history.length === 0 || !!state.preview}
+        onClick={undo}
+        title={state.preview ? '预览待确认：采用或放弃后可撤销' : undefined}
+      >
         撤销 ({state.history.length})
       </button>
 

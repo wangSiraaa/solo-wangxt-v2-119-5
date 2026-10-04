@@ -155,14 +155,18 @@ export function View2D() {
   }, []);
 
   const { mesh: meshData, stats } = state;
+  // 预览期间 2D 视图切换为候选 UV（3D 视图与正式面板仍显示当前模型）
+  const preview = state.preview;
+  const displayMesh = preview ? preview.mesh : meshData;
+  const displayStats = preview ? preview.stats : stats;
 
   // 重建填充与分类边
   useEffect(() => {
     const world = worldRef.current;
-    if (!world || !meshData || !stats) return;
-    world.meshData = meshData;
+    if (!world || !displayMesh || !displayStats) return;
+    world.meshData = displayMesh;
 
-    const fg = buildUvFills(meshData, stats, {
+    const fg = buildUvFills(displayMesh, displayStats, {
       showFlipped: state.showFlipped,
       showOverlap: state.showOverlap,
     });
@@ -175,7 +179,7 @@ export function View2D() {
       (c as THREE.LineSegments).geometry?.dispose();
     });
     layer.clear();
-    const edges = buildUvEdges(meshData, stats);
+    const edges = buildUvEdges(displayMesh, displayStats);
     const addEdges = (geo: THREE.BufferGeometry, color: number, opacity: number, order: number) => {
       const line = new THREE.LineSegments(
         geo,
@@ -195,19 +199,19 @@ export function View2D() {
     addEdges(edges.nonManifold, 0xff3b5c, 1.0, 3);
 
     // 换模型（而非仅切换标记）时自动取景到 UV 包围盒
-    if (world.lastFitMesh !== meshData) {
-      world.lastFitMesh = meshData;
+    if (world.lastFitMesh !== displayMesh) {
+      world.lastFitMesh = displayMesh;
       world.zoomFit();
     }
-  }, [meshData, stats, state.showFlipped, state.showOverlap]);
+  }, [displayMesh, displayStats, state.showFlipped, state.showOverlap]);
 
   // 选择高亮
   useEffect(() => {
     const world = worldRef.current;
-    if (!world || !meshData) return;
+    if (!world || !displayMesh) return;
     world.selection.geometry.dispose();
-    world.selection.geometry = buildUvSelection(meshData, state.selectedFaceIds);
-  }, [state.selectedFaceIds, meshData]);
+    world.selection.geometry = buildUvSelection(displayMesh, state.selectedFaceIds);
+  }, [state.selectedFaceIds, displayMesh]);
 
   // 拾取（平移与点选区分）
   useEffect(() => {
@@ -251,8 +255,10 @@ export function View2D() {
 
   return (
     <div className="view view2d" ref={mountRef}>
-      <div className="view-label">
-        2D UV — V 向上（OBJ 原生方向）· 双击自适应 · 拖动平移/滚轮缩放
+      <div className={`view-label${preview ? ' preview' : ''}`}>
+        {preview
+          ? '2D UV — 预览：xatlas 候选（未采用）· 双击自适应 · 拖动平移/滚轮缩放'
+          : '2D UV — V 向上（OBJ 原生方向）· 双击自适应 · 拖动平移/滚轮缩放'}
       </div>
     </div>
   );

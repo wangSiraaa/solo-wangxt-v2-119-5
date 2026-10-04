@@ -8,11 +8,11 @@ import {
   useRef,
 } from 'react';
 import type { ReactNode } from 'react';
-import type { MeshData, MeshStats, ProjectRecord } from '../core/types';
+import type { MeshStats, ProjectRecord } from '../core/types';
 import { parseObj } from '../core/parser';
 import { analyzeMesh } from '../core/metrics';
 import { exportObj } from '../core/exporter';
-import { unwrapWithXAtlas } from '../core/unwrapping';
+import { buildUnwrappedMesh, unwrapWithXAtlas } from '../core/unwrapping';
 import {
   deleteProject,
   listProjects,
@@ -20,109 +20,21 @@ import {
   makeProjectId,
   saveProject,
 } from '../core/storage';
+import type { Notice } from './appState';
+import { appReducer, createInitialState } from './appState';
 
-export interface Notice {
-  kind: 'info' | 'error' | 'success';
-  text: string;
-}
-
-export interface AppState {
-  mesh: MeshData | null;
-  stats: MeshStats | null;
-  objText: string;
-  fileName: string;
-  projectId: string | null;
-  selectedFaceIds: Set<number>;
-  checkerOn: boolean;
-  checkerScale: number;
-  showFlipped: boolean;
-  showOverlap: boolean;
-  unwrapping: boolean;
-  notice: Notice | null;
-  history: MeshData[];
-}
-
-type Action =
-  | { type: 'load'; mesh: MeshData; stats: MeshStats; objText: string; fileName: string; projectId: string | null }
-  | { type: 'replace-mesh'; mesh: MeshData; stats: MeshStats; notice?: Notice }
-  | { type: 'select'; faceIds: Set<number> }
-  | { type: 'toggle-face'; faceId: number }
-  | { type: 'set-checker'; on: boolean; scale?: number }
-  | { type: 'toggle-flag'; key: 'showFlipped' | 'showOverlap' }
-  | { type: 'unwrapping'; on: boolean }
-  | { type: 'notice'; notice: Notice | null }
-  | { type: 'project-id'; id: string | null }
-  | { type: 'undo' };
-
-function reducer(state: AppState, action: Action): AppState {
-  switch (action.type) {
-    case 'load':
-      return {
-        ...state,
-        mesh: action.mesh,
-        stats: action.stats,
-        objText: action.objText,
-        fileName: action.fileName,
-        projectId: action.projectId,
-        selectedFaceIds: new Set(),
-        unwrapping: false,
-        history: [],
-        notice: null,
-      };
-    case 'replace-mesh':
-      return {
-        ...state,
-        mesh: action.mesh,
-        stats: action.stats,
-        history: state.mesh ? [...state.history, state.mesh].slice(-10) : state.history,
-        notice: action.notice ?? state.notice,
-      };
-    case 'select':
-      return { ...state, selectedFaceIds: action.faceIds };
-    case 'toggle-face': {
-      const next = new Set(state.selectedFaceIds);
-      if (next.has(action.faceId)) next.delete(action.faceId);
-      else next.add(action.faceId);
-      return { ...state, selectedFaceIds: next };
-    }
-    case 'set-checker':
-      return {
-        ...state,
-        checkerOn: action.on,
-        checkerScale: action.scale ?? state.checkerScale,
-      };
-    case 'toggle-flag':
-      return { ...state, [action.key]: !state[action.key] };
-    case 'unwrapping':
-      return { ...state, unwrapping: action.on };
-    case 'notice':
-      return { ...state, notice: action.notice };
-    case 'project-id':
-      return { ...state, projectId: action.id };
-    case 'undo': {
-      if (state.history.length === 0) return state;
-      const prev = state.history[state.history.length - 1];
-      return {
-        ...state,
-        mesh: prev,
-        stats: analyzeMesh(prev),
-        history: state.history.slice(0, -1),
-        notice: { kind: 'info', text: '已撤销上一次 UV 替换' },
-      };
-    }
-    default:
-      return state;
-  }
-}
+export type { Notice, AppState, UnwrapPreview } from './appState';
 
 export interface AppContextValue {
-  state: AppState;
+  state: import('./appState').AppState;
   loadObjText: (text: string, fileName: string, projectId?: string | null) => void;
   selectFaces: (faceIds: Set<number>) => void;
   toggleFace: (faceId: number) => void;
   setChecker: (on: boolean, scale?: number) => void;
   toggleFlag: (key: 'showFlipped' | 'showOverlap') => void;
   runUnwrap: () => Promise<void>;
+  adoptPreview: () => void;
+  discardPreview: () => void;
   exportCurrent: () => void;
   saveCurrent: () => Promise<void>;
   projects: ProjectRecord[];
@@ -136,21 +48,7 @@ export interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, () => ({
-    mesh: null,
-    stats: null,
-    objText: '',
-    fileName: '',
-    projectId: null,
-    selectedFaceIds: new Set<number>(),
-    checkerOn: true,
-    checkerScale: 8,
-    showFlipped: true,
-    showOverlap: true,
-    unwrapping: false,
-    notice: null,
-    history: [] as MeshData[],
-  }));
+  const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -217,7 +115,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const runUnwrap = useCallback(async () => {
     const cur = stateRef.current.mesh;
-    if (!cur || stateRef.current.unwrapping) return;
+    // 已有待确认预览时不重复展开（按钮同步禁用，这里兜底）
+    if (!cur || stateRef.current.unwrapping || stateRef.current.preview) return;
     dispatch({ type: 'unwrapping', on: true });
     dispatch({
       type: 'notice',
@@ -229,24 +128,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!Number.isFinite(result.utilization) || result.uvs.length !== cur.corners.length * 2) {
         throw new Error('xatlas 返回结果不完整');
       }
-      const next: MeshData = {
-        ...cur,
-        uvs: result.uvs,
-        uvCount: result.uvs.length / 2,
-        hasUv: true,
-        uvOrigin: 'obj',
-        corners: cur.corners.map((c, ci) => ({ ...c, vt: ci })),
-      };
-      // 每个角点一个独立 vt 槽（接缝分裂后本来就不同）
-      next.uvs = result.uvs;
-      const stats = analyzeMesh(next);
+      const next = buildUnwrappedMesh(cur, result);
+      const stats: MeshStats = analyzeMesh(next);
+      // 只生成预览：当前网格与撤销历史在此刻保持原状，
+      // 是否替换由用户「采用」决定（adopt-preview 是唯一替换点）。
       dispatch({
-        type: 'replace-mesh',
-        mesh: next,
-        stats,
+        type: 'preview-set',
+        preview: {
+          mesh: next,
+          stats,
+          chartCount: result.chartCount,
+          utilization: result.utilization,
+        },
         notice: {
-          kind: 'success',
-          text: `自动展开完成：${result.chartCount} 个图，利用率 ${(result.utilization * 100).toFixed(0)}%`,
+          kind: 'info',
+          text: `预览已生成：${result.chartCount} 个图，利用率 ${(result.utilization * 100).toFixed(0)}% — 请在 2D 视图确认后采用或放弃`,
         },
       });
     } catch (e) {
@@ -261,6 +157,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       dispatch({ type: 'unwrapping', on: false });
     }
+  }, []);
+
+  const adoptPreview = useCallback(() => {
+    const p = stateRef.current.preview;
+    if (!p) return;
+    dispatch({
+      type: 'adopt-preview',
+      notice: {
+        kind: 'success',
+        text: `已采用自动展开：${p.chartCount} 个图，利用率 ${(p.utilization * 100).toFixed(0)}%（可撤销）`,
+      },
+    });
+  }, []);
+
+  const discardPreview = useCallback(() => {
+    if (!stateRef.current.preview) return;
+    dispatch({
+      type: 'preview-clear',
+      notice: { kind: 'info', text: '已放弃预览，当前 UV 与撤销历史保持原状' },
+    });
   }, []);
 
   const exportCurrent = useCallback(() => {
@@ -340,6 +256,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setChecker,
       toggleFlag,
       runUnwrap,
+      adoptPreview,
+      discardPreview,
       exportCurrent,
       saveCurrent,
       projects,
@@ -350,8 +268,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       undo,
     }),
     [state, projects, loadObjText, selectFaces, toggleFace, setChecker,
-      toggleFlag, runUnwrap, exportCurrent, saveCurrent, refreshProjects,
-      openProject, removeProject, notify, undo],
+      toggleFlag, runUnwrap, adoptPreview, discardPreview, exportCurrent,
+      saveCurrent, refreshProjects, openProject, removeProject, notify, undo],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
